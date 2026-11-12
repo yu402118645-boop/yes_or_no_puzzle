@@ -1,0 +1,44 @@
+name: Probe Bilibili with yt-dlp
+on:
+  push:
+    branches: ['diagnostics/bilibili-open-source']
+    paths: ['.github/workflows/bilibili-probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install official yt-dlp package
+        run: python -m pip install --disable-pip-version-check yt-dlp
+      - name: Probe public video without credentials
+        run: |
+          python - <<'PY'
+          import json, re, os
+          import yt_dlp
+          from yt_dlp.version import __version__
+          messages = []
+          class Logger:
+              def debug(self, msg): pass
+              def warning(self, msg): messages.append(str(msg))
+              def error(self, msg): messages.append(str(msg))
+          report = {'tool': 'yt-dlp', 'version': __version__, 'video': 'BV1CmLHz9EnN', 'start': '21:54', 'credentials': False}
+          opts = {'skip_download': True, 'noplaylist': True, 'quiet': True, 'no_warnings': True, 'socket_timeout': 15, 'retries': 0, 'extractor_retries': 0, 'logger': Logger()}
+          try:
+              with yt_dlp.YoutubeDL(opts) as ydl:
+                  data = ydl.extract_info('https://www.bilibili.com/video/BV1CmLHz9EnN/', download=False)
+              report.update(status='metadata_ok', duration=data.get('duration'), subtitle_languages=sorted(data.get('subtitles', {})), automatic_caption_languages=sorted(data.get('automatic_captions', {})), audio_formats=sum(1 for f in data.get('formats', []) if f.get('vcodec') == 'none' and f.get('acodec') != 'none'))
+          except Exception as exc:
+              diagnostic = '\n'.join(messages + [str(exc)])
+              codes = sorted(set(re.findall(r'HTTP Error (\d{3})', diagnostic)))
+              report.update(status='source_unavailable', http_status=codes, exception_type=type(exc).__name__, login_required=bool(re.search(r'login|log in|cookies', diagnostic, re.I)))
+          output = json.dumps(report, ensure_ascii=False, indent=2)
+          print(output)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('### Public Bilibili source probe\n\nNo cookies or secrets were used. No media was downloaded.\n\n' + '```json\n' + output + '\n```\n')
+          PY
