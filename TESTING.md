@@ -12,6 +12,10 @@
 
 `npm run check`：Wrangler 部署包构建检查通过，不触发部署。
 
+## Cloudflare 部署验收
+
+2026-11-12：Cloudflare 官方 GitHub 构建（Build `cf24f18d-8f3b-4a45-b3f6-451a51b9f1fc`）在 Node 24.22.2 上执行 14 项测试，全部通过；`npm run check` 与 `npm run deploy` 成功。生产版本 `59891d0b-f0f7-4b39-a7dd-aaef4e409739`。域名 `https://soup.yingxinzone.top/` 已绑定并在浏览器核实首页，ROOMS Durable Object 绑定存在，日志／追踪关闭。AI 密钥尚未配置，创建入口关闭。
+
 ## 浏览器人工检查
 
 已在本机浏览器打开真实 Worker 首页，检查桌面及 390px 手机宽度布局；表单、上传入口、说明文字正常呈现。此项不等于完成了手机实机游戏、剪贴板图片和公网联机验收。
@@ -20,7 +24,7 @@
 
 - 尝试 Miniflare `unsafeEvictDurableObject(..., {webSockets:'hibernate'})` 强制休眠，等待 30 秒后因 active references 超时。已从通过测试中剔除。持久化恢复由业务测试验证，真实 Cloudflare 自动休眠及唤醒仍需部署后核实。
 - 没有调用真实 OpenAI API，没有验证账户模型可用性、语义质量、提示注入对事实覆盖的影响或费用。结构化四枚举限制已经测试，但模型判断正确率不能由模拟结果证明。
-- 尚未进行 Cloudflare 公网部署、真实域名／证书验收、免费 CPU 和每日配额压力测试。
+- Cloudflare 公网部署与真实域名 HTTPS 首页已核实；免费 CPU、每日配额压力测试和真实公网多人游戏验收仍未执行。
 - 尚未完成真实手机浏览器中图片粘贴、放大、软键盘、弱网断线以及完整游戏流程的操作验收。
 
 ## 部署后验收清单（需账户授权及确认模型费用）
