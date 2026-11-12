@@ -40,7 +40,7 @@ export class Extraction {
  if(this.job.start>=end||end>info.duration+0.1)throw new ExtractError('BAD_RANGE',`视频分 P 时长为 ${Math.floor(info.duration/60)}:${String(info.duration%60).padStart(2,'0')}，请检查起止时间`);
  if(end-this.job.start>1800)throw new ExtractError('RANGE_TOO_LONG','单次最多提取 30 分钟，请填写结束时间分段提取');
  await this.update({stage:'正在检查时间段内的公开字幕',info,start:this.job.start,end});
- let captions;try{captions=await api.subtitles(info,this.job.start,end);}catch(e){if(e.code==='SOURCE_UNAVAILABLE')throw e;captions=null;}
+ let captions;try{captions=await api.subtitles(info,this.job.start,end);}catch(e){if(['SOURCE_UNAVAILABLE','SOURCE_BLOCKED'].includes(e.code))throw e;captions=null;}
  if(captions){await this.complete(info,end,captions.segments,'subtitle','已按时间筛选视频字幕。边界处保留整句；文字不经过 AI 改写，可能含视频原有口误。');return;}
  if(!this.env.AI)throw new ExtractError('NO_TRANSCRIPTION','没有可读取的字幕，且云端语音转写尚未启用');
  await this.update({stage:'没有公开字幕，正在读取所选音频片段'});

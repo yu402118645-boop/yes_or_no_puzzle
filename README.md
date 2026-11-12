@@ -43,7 +43,7 @@ Cloudflare 构建命令：`npm test && npm run check`；部署命令：`npm run 
 
 ## 验证状态
 
-本机自动化测试覆盖 URL／时间、时间段字幕、跨域请求边界、SIDX 字节偏移、fMP4 时间戳修正、禁止整视频回退、字幕 ID 绑定和真实 workerd 异步提取流程。真实 B 站视频、音频解码和线上 Workers AI 仍需以实际部署后的测试结果为准，模拟通过不等于真实提取成功。结果记录见 `EXTRACTION_TESTING.md`。
+本机自动化测试覆盖 URL／时间、时间段字幕、跨域请求边界、SIDX 字节偏移、fMP4 时间戳修正、禁止整视频回退、字幕 ID 绑定和真实 workerd 异步提取流程。已在 Cloudflare 部署并用指定视频真实提交任务，但被 B 站源读取限制阻断，没有提取成功。普通浏览器可打开原视频。真实音轨解码和线上 Whisper 尚未得到验证，模拟通过不等于真实提取成功。结果记录见 `EXTRACTION_TESTING.md`。
 
 用户指定验收视频：`https://www.bilibili.com/video/BV1CmLHz9EnN/`，起点 `21:54`，终点默认视频结束。
 

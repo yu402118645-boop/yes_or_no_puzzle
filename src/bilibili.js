@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 export class ExtractError extends Error { constructor(code,message){super(message);this.code=code;} }
-const denied=()=>new ExtractError('SOURCE_UNAVAILABLE','B 站未允许云端读取该视频。请检查视频是否公开；登录、地区或平台访问限制不会被绕过。');
+const denied=()=>new ExtractError('SOURCE_UNAVAILABLE','暂时无法从 B 站读取视频源内容，未生成汤底文字。');
+export function sourceError(code){if([403,412,429,-352,-412,-509].includes(code))return new ExtractError('SOURCE_BLOCKED','B 站限制了云端服务器的读取请求。视频可能在浏览器中正常播放，但当前无法自动提取。');if(code===-404)return new ExtractError('NOT_FOUND','B 站未找到该视频，请检查链接或视频是否已删除。');if(code===-101)return new ExtractError('LOGIN_REQUIRED','该视频接口要求登录，当前云端没有 B 站登录授权。');return denied();}
 const mix=[46,47,18,2,53,8,23,32,15,50,10,31,58,3,45,35,27,43,5,49,33,9,42,19,29,28,14,39,12,38,41,13,37,48,7,16,24,55,40,61,26,17,0,1,60,51,30,4,22,25,54,21,56,59,6,63,57,62,11,36,20,34,44,52];
 export function parseTime(value,optional=false){
  if(optional&&(value===undefined||value===null||value===''))return null;
@@ -23,14 +24,14 @@ export function videoURL(input){
  return {id,page,url:`https://www.bilibili.com/video/${id}/?p=${page}`};
 }
 export function allowedAsset(url){let u;try{u=new URL(url.startsWith('//')?'https:'+url:url);}catch{throw denied();}if(u.protocol!=='https:'||u.username||u.password||u.port||!['hdslb.com','bilibili.com','bilivideo.com','bilivideo.cn'].some(h=>u.hostname===h||u.hostname.endsWith('.'+h)))throw denied();return u.href;}
-export async function bytes(res,max){if(!res.ok||!res.body)throw denied();const reader=res.body.getReader(),chunks=[];let size=0;while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>max){await reader.cancel();throw new ExtractError('TOO_LARGE','片段数据过大，请缩短时间段');}chunks.push(value);}const data=new Uint8Array(size);let at=0;for(const chunk of chunks){data.set(chunk,at);at+=chunk.length;}return data;}
+export async function bytes(res,max){if(!res.ok)throw sourceError(res.status);if(!res.body)throw denied();const reader=res.body.getReader(),chunks=[];let size=0;while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>max){await reader.cancel();throw new ExtractError('TOO_LARGE','片段数据过大，请缩短时间段');}chunks.push(value);}const data=new Uint8Array(size);let at=0;for(const chunk of chunks){data.set(chunk,at);at+=chunk.length;}return data;}
 export class Bilibili {
  constructor(fetcher=(...args)=>fetch(...args)){this.fetcher=fetcher;}
  async fetch(url,options={}){return this.fetcher(url,{redirect:'manual',signal:AbortSignal.timeout(20000),headers:{Referer:'https://www.bilibili.com/',...options.headers},...options});}
  async json(url,max=2000000){const r=await this.fetch(url);try{return JSON.parse(new TextDecoder().decode(await bytes(r,max)));}catch(e){if(e instanceof ExtractError)throw e;throw denied();}}
  async api(path,params={},signed=false){if(signed){if(!this.key){const nav=await this.json('https://api.bilibili.com/x/web-interface/nav');const w=nav.data?.wbi_img;const lookup=[w?.img_url,w?.sub_url].map(x=>typeof x==='string'?x.split('/').pop().split('.')[0]:'').join('');if(lookup.length!==64)throw denied();this.key=mix.map(i=>lookup[i]).join('').slice(0,32);}
  params={...params,wts:Math.floor(Date.now()/1000)};const q=new URLSearchParams(Object.keys(params).sort().map(k=>[k,String(params[k]).replace(/[!'()*]/g,'')]));q.set('w_rid',createHash('md5').update(q.toString()+this.key).digest('hex'));params=q;}
- const data=await this.json('https://api.bilibili.com'+path+'?'+new URLSearchParams(params));if(data.code!==0)throw denied();return data.data;}
+ const data=await this.json('https://api.bilibili.com'+path+'?'+new URLSearchParams(params));if(data.code!==0)throw sourceError(data.code);return data.data;}
  async info(input){let parsed=videoURL(input);if(parsed.short){const r=await this.fetch(parsed.short);if(![301,302,303,307,308].includes(r.status))throw denied();parsed=videoURL(r.headers.get('Location'));if(parsed.short)throw denied();}
  const params=parsed.id.startsWith('BV')?{bvid:parsed.id}:{aid:parsed.id.slice(2)};
  const data=await this.api('/x/web-interface/view',params);const part=data.pages?.find(p=>p.page===parsed.page);if(!part||!Number.isFinite(part.duration)||data.bvid?.length!==12)throw denied();
