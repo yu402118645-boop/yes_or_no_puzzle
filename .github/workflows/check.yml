@@ -1,4 +1,4 @@
-name: Check Phase 1
+name: Verify application
 on: [push, pull_request]
 permissions:
   contents: read

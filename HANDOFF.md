@@ -1,3 +1,5 @@
+> 当前范围更新：用户已取消房间和 AI 主持，改为 B 站链接＋起止时间提取。以 PRODUCT_SPEC_EXTRACTION.md 和新版 README.md 为准；下方为历史交接。
+
 # Codex 开发交接
 
 最终产品需求以 PRODUCT_SPEC_V3.md 为准。先 Phase 1，后 Phase 2。

@@ -1,75 +1,50 @@
-# 一碗汤 · Yes / No Puzzle
+# 一碗汤 · B 站汤底片段提取
 
-按 `PRODUCT_SPEC_V3.md` 实现的 Phase 1 多人海龟汤。一个 Worker + 每房间一个 SQLite Durable Object + WebSocket Hibernation + 静态页面；没有 D1、Queue、R2 或独立服务器。另有一个共享 DO 用于创建限流。旧导入原型位于本地 `work/legacy-blind-import/`，被 Git 忽略，不参与构建或部署。
+最新需求：只输入 B 站视频链接和汤底对应的时间段，自动提取该片段文字。不再提供房间、多人聊天、AI 主持或推理进度。
 
-## 当前部署
+网站：**https://soup.yingxinzone.top/**。本版本覆盖原游戏首页，原游戏实现保留在源码和 Git 历史中，旧房间接口在新入口中不可访问。最新功能边界见 `PRODUCT_SPEC_EXTRACTION.md`，之前的游戏任务书不是当前开发范围。
 
-2026-11-12 已通过 Cloudflare GitHub 集成部署到 **https://soup.yingxinzone.top/**，生产分支 `main`。Cloudflare 云端运行了 14 项测试，全部通过；构建检查及部署成功，已核实 HTTPS 首页。正式域名写入仓库配置，停用额外 workers.dev 和预览地址。
+## 使用
 
-`OPENAI_API_KEY` 尚未配置，`ALLOW_CREATE=false`，因此目前首页可访问但不能创建游戏。请在 Worker 运行时 Secrets 中配置密钥，确认模型费用后再开放创建。尚未执行真实模型和完整公网多人游戏验收。
+1. 粘贴 `https://www.bilibili.com/video/BV…/` 或 `https://b23.tv/…` 链接；支持 `?p=2` 分 P。
+2. 输入起始时间，例如 `21:54`，也接受 `21.54`、`01:21:54` 或纯秒数。
+3. 结束时间可不填，默认取该分 P 结尾。单次时间段最多 30 分钟；超出时明确要求分段。
+4. 等待提取，复制或下载文字。结果附带来源、时间及逐句时间标记。
 
-## 已实现
+结果是所选片段的原文／语音转写，不用语言模型改写，不保证该片段包含完整汤底，不自行补充故事。字幕和转写的句子若跨越时间边界，会保留整句，结果页会说明。
 
-- 文字汤面、上传／粘贴 PNG/JPEG/WebP 原图，图片最大 2 MiB，原始字节保留、可放大。图片分成 64 KB 存于同一房间 DO，无需开通 R2；AI 判断时可读取原图视觉线索。
-- 创建分享链接；1–4 个匿名席位；浏览器按房间保存随机身份令牌，刷新与重连恢复昵称；同一身份仅保留一个连接。
-- 公开聊天与正式 AI 提问分开；最近 200 条公开消息同步给新加入／重连者。
-- 服务端调用 OpenAI Responses API，结构化输出加服务端四种枚举白名单；正式回答没有自由文本说明。
-- 创建时提取 5–12 项私有关键事实；只接受带有本次问题原文证据的模型覆盖结果；进度为已发现事实数量／总事实数量。聊天次数不增加进度。
-- 提示模型只接收公开汤面、公开历史和百分比，只能选择三个温和策略之一，服务端输出固定引导文案。不会把私有事实提供给提示生成。此版本提示偏保守，不生成故事专属新线索。
-- 90% 后任意参与者可发起公布；服务端产生与身份绑定、30 秒过期的确认令牌；确认后公开完整汤底并结束，拒绝后续聊天／AI 操作。
-- 服务端投影公开字段；身份令牌、事实和未公布汤底不在公开 API／WS 中。错误只返回固定信息，不输出模型响应或堆栈；关闭 Worker 应用日志；前端以 `textContent` 显示输入。
+## 提取顺序与限制
 
-## 配置与费用开关
+- 读取并校验视频元信息及分 P，以签名播放器接口获得字幕，检查 aid/cid 对应关系。优先中文人工／自动字幕，按时间截取。
+- 没有公开字幕时，尝试读取公开 DASH AAC 音轨的初始化区间和 SIDX 索引，按索引使用 HTTP Range 读取选中片段，将 fMP4 时间戳归零后交给 Cloudflare Workers AI Whisper 转写。不会下载整部视频，也不运行 yt-dlp、ffmpeg 或 Docker。
+- 不需要 OpenAI API Key；不会调用 OpenAI 付费 API。Whisper 模型由 Cloudflare 提供，不是使用当前聊天／Codex 订阅额度。
+- 仅支持可公开读取、支持 Range 和直接 SIDX 索引的音轨；不支持的编码／索引、无有效语音、登录要求、地区／付费／风控限制会明确失败。不会绕过访问控制，也不拿弹幕、简介或其他视频字幕冒充结果。
+- 语音识别可能有错字、漏字或误识别，必须对照原视频核对；过滤高无语音概率和低置信度片段不能保证绝对准确。
 
-`wrangler.jsonc` 包含 SQLite migration、静态资源绑定和以下服务端参数：
+## 架构
 
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `AI_MODEL` | `gpt-6.1-sol` | 高性能推理模型，可改为账户可用的其他模型 |
-| `AI_REASONING` | `high` | 推理强度 |
-| `MAX_AI_CALLS` | `80` | 每房间全部模型请求上限，含创建时提取、提示和失败调用 |
-| `MAX_ROOMS_PER_DAY` | `10` | 整个应用每天创建尝试上限，按 UTC 日重置 |
-| `ALLOW_CREATE` | `false` | 配置好密钥、确认模型费用后才改为 `true` |
+单 Worker + 异步提取任务 Durable Object + Workers AI + 静态页面。Durable Object 只用于任务、进度和免费用量限制，不是游戏房间。无独立服务器、数据库产品、Queue、R2 或原生处理容器。
 
-密钥名 **`OPENAI_API_KEY`**。只在 Cloudflare Worker → Settings → Variables and Secrets → Add → Secret 配置，不写入代码、不发到聊天、不放 GitHub 普通变量。使用单独 OpenAI 项目密钥，在官方项目设置检查模型访问和用量限额。应用开关 `ALLOW_CREATE=false` 可立即停止新增房间；删除／轮换密钥可停止所有后续模型请求。
+`src/extractor-worker.js` 为当前入口，`src/bilibili.js` 负责受限来源请求，`src/mp4.js` 负责音轨字节截取；当前页面位于 `extractor-public/`。原游戏 `src/worker.js` 和 `public/` 不对外提供游戏接口。保留原 Room namespace／迁移以免破坏已有状态，没有做数据删除迁移。
 
-限制：每 IP 每小时最多 5 次创建尝试；全站每天最多 10 次；每人发送间隔至少 700ms；每房间 AI 间隔至少 4 秒、同时一个请求；提示共享 60 秒冷却；输入汤面 8000 字符、汤底 16000 字符、消息 1500 字符；模型单请求最多 5000 输出 tokens、60 秒超时，不自动重试。重复消息有持久化去重标识。模型调用前先持久化占用次数和请求标识，避免重连重复付费；如果请求中途异常或对象重启，可能不会完成该次回答，玩家可重新提交新的问题。
+## 费用与配额
 
-## 不需要本机工具的部署流程
+Cloudflare [Workers AI 官方价格](https://developers.cloudflare.com/workers-ai/platform/pricing/)在 2026-11-12 核实：Free 计划每天 10,000 Neurons，超额停止；Paid 计划超额可产生费用。此工具不自动升级套餐。请保持当前账户 Free 计划。
 
-推荐在已授权的 Codex Cloud／GitHub 开发环境完成代码推送，再使用 Cloudflare 官方 GitHub 集成。当前本地开发聊天**不是已运行的 Codex Cloud 任务**。
+[Whisper large v3 turbo](https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/) 官方提供 Cloudflare 语音转写；额度与账户内其他 AI 服务共享，不能保证始终有余额。本站在转写前预留每日最多 90 分钟音频，失败任务也占用预留额度，不自动重试消耗。按约 46.63 Neurons／分钟的官方价格表估计约 4,200 Neurons／日，最终以官方用量为准。字幕路径不消耗 AI 额度。
 
-1. 将本目录代码推到 `https://github.com/yu402118645-boop/yes_or_no_puzzle`。如需授权，仅在 GitHub／Codex 官方登录界面完成，不向聊天发送 Token。
-2. Cloudflare Dashboard → Workers & Pages → Create application → 连接 GitHub，选择该仓库，创建 **Worker**（不是静态 Pages 项目）。授权只选择该仓库。项目根目录是仓库根目录。
-3. 配置构建命令 `npm ci && npm test && npm run check`，部署命令 `npm run deploy`，运行环境 Node 24。`wrangler.jsonc` 会创建 SQLite DO namespace 和静态资源绑定。
-4. 首次保持 `ALLOW_CREATE=false` 部署；在 Worker Settings 的 Secrets 中设置 `OPENAI_API_KEY`。检查 OpenAI 项目有对应模型权限、余额／费用限制，再将仓库 `ALLOW_CREATE` 改成 `true` 并重新部署。不要只改控制台同名普通变量，因为下一次仓库部署可能覆盖它。
-5. 在 Cloudflare 开发域名打开首页，再邀请两个独立浏览器测试。首次正式模型测试会产生费用，应在确认预算后进行；真实 API 质量与云端验收清单见 `TESTING.md`。
-6. 绑定域名：确保 `yingxinzone.top` 已在该 Cloudflare 账户管理。Worker → Settings → Domains & Routes → Add → Custom Domain → `soup.yingxinzone.top`。由官方控制台创建 DNS 与证书。若已有同名记录或服务，先检查冲突并确认替换，不删除不明记录。
-7. HTTPS 生效后，用该域名重新创建并分享游戏链接；身份保存在浏览器当前域名下，开发域名身份不会自动迁移。
+每 IP 每小时最多 5 次提交；任务及结果一小时后删除；任务令牌放在 sessionStorage，状态 API 需要 Authorization；不返回音轨地址或上游错误正文。来源 URL／字幕流／音频流有域名、长度、超时和大小限制。模型不接收网页指令，只有音频转写。
 
-GitHub CI（`.github/workflows/check.yml`）只运行测试和部署包检查，不存储部署密钥，不自动上线。Cloudflare Git 集成承担部署和账户授权。以上控制台路径以实际账户 UI 为准，DO 免费计划须支持 SQLite。
+## 部署
 
-如果已有完整云端开发环境，开发者命令为 `npm ci`、`npm test`、`npm run check`、`npm run dev`。这不是要求用户在自己电脑安装工具。
+继续使用已有 Cloudflare Worker `yes-or-no-puzzle` 和 GitHub `main` 自动部署，保留 `soup.yingxinzone.top`。配置含 `AI` Workers AI binding 和 SQLite `EXTRACTIONS` namespace，`nodejs_compat` 用于标准 WBI 签名散列。无需用户本机安装任何工具。
 
-## 核实的成本条件（2026-11-12）
+Cloudflare 构建命令：`npm test && npm run check`；部署命令：`npm run deploy`；构建 Node 24。开发者在现有环境可运行 `npm test` 和 `npm run check`。没有需要粘贴到聊天的密钥。新绑定如需账户开通／接受条款，由用户在官方控制台确认，不擅自启用付费套餐。
 
-- [Workers 官方价格](https://developers.cloudflare.com/workers/platform/pricing/)：Free 每日 100,000 请求，CPU 每次 10ms；超限可能拒绝请求。图片处理与状态序列化在较大输入时仍需线上测量 CPU。
-- [Durable Objects 官方价格](https://developers.cloudflare.com/durable-objects/platform/pricing/)：Free 可使用 SQLite DO；每日 100,000 请求、13,000 GB-s；SQLite 每日 500 万行读、10 万行写，总计 5 GB 存储。超免费额度会失败。静态空闲 WS 使用 [Hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/) 减少计算时长。每次广播、存储和模型等待仍可能消耗额度。
-- [OpenAI 官方模型目录](https://developers.openai.com/api/docs/models)和 [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol)：目录当前提供 `gpt-6.1-sol`，输入 $2／百万 tokens、输出 $10／百万 tokens。模型调用不是 Cloudflare 免费资源；实际权限与价格以官方账户为准。
-- 每局主要成本是“创建事实清单 + 正式问题 + 提示”的模型调用，推理 tokens 和图片输入都影响费用。示例：若全局累计输入 10 万、输出含推理 5 万 tokens，按上述价格约 $0.70。不是每局固定报价。
-- 按单请求最多 5000 输出 tokens，80 次调用仅输出部分理论上约 $4，**另加全部输入费用**；80 次不是美元预算。OpenAI 预算告警不应被视作绝对硬上限。可降低 `MAX_AI_CALLS` 和每日房间数，不必降低模型质量。
-- 免费资源限额和单对象存储／执行限制仍适用；没有启用付费 Workers 计划、R2、容器或其他付费服务。
+## 验证状态
 
-## 已知限制
+本机自动化测试覆盖 URL／时间、时间段字幕、跨域请求边界、SIDX 字节偏移、fMP4 时间戳修正、禁止整视频回退、字幕 ID 绑定和真实 workerd 异步提取流程。真实 B 站视频、音频解码和线上 Workers AI 仍需以实际部署后的测试结果为准，模拟通过不等于真实提取成功。结果记录见 `EXTRACTION_TESTING.md`。
 
-- 尚未配置真实账户密钥，未执行真实付费模型质量评测、互联网多人联机或 Cloudflare 免费 CPU 测量；正式域名 HTTPS 首页已验收，不能据模拟测试声称上线可玩。
-- 事实提取与语义覆盖仍依赖模型，可能误判、漏判或过早估计进度；四种输出限制可防止正式回答夹带文字，但不能保证语义判断永远正确。提示只输出约束策略，较保守。
-- 每房间保留 4 个身份席位至过期，不回收离线席位，以保证短时断线／刷新稳定；关闭无痕浏览器、清除站点数据或换设备无法找回身份。UI 显示的是已加入人数，不是在线人数。
-- 房间从创建起保留 7 天，然后删除汤底、历史、原图和身份；只展示最近 200 条记录。房间链接相当于朋友间的邀请，任何持有链接的人可占一个席位。
-- Hibernation API 连接已在本机验证；持久化恢复通过对象重建测试。强制真实休眠测试在当前 Miniflare 版本因 active references 超时，未通过，须在 Cloudflare 预览部署进一步核实。历史较多或 2 MiB 图片的极限负载尚未线上测量。
-- AI 请求期间该房间操作排队，最多等待模型超时 60 秒；界面显示处理中。模型失败可重新发送，失败请求也计入预算。
-- Phase 2 B 站盲导入未开发／未部署。后续应提取与用户汤面匹配的汤底；无字幕音频服务与费用必须另行确认。旧代码不是生产功能。
+用户指定验收视频：`https://www.bilibili.com/video/BV1CmLHz9EnN/`，起点 `21:54`，终点默认视频结束。
 
-## 源码
-
-`src/worker.js`：入口、房间、身份、实时状态及限流；`src/core.js`：公开投影与数据规则；`src/ai.js`：私有模型调用与结构化约束；`public/`：响应式中文界面；`test/`：业务边界与真实 workerd 集成测试。最终产品边界见 `PRODUCT_SPEC_V3.md`。
+签名流程参考 [yt-dlp Bilibili 提取器实现](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/bilibili.py)，未将其整个处理服务带入项目。
